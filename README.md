@@ -43,6 +43,22 @@ flowchart LR
   G --> H["SSE stream + dashboard views"]
 ```
 
+### System architecture flow
+
+```mermaid
+flowchart LR
+  A["Operator opens dashboard"] --> B["React frontend"]
+  B --> C["Express analysis API"]
+  C --> D["Queue + analysis worker"]
+  D --> E["Playwright crawler"]
+  E --> F["Deep analysis + scenario probes"]
+  F --> G["MongoDB persistence"]
+  F --> H["Artifacts directory"]
+  G --> I["Run history + reports"]
+  H --> I
+  I --> B
+```
+
 ### Runtime flow
 
 1. The operator submits a website URL and optional backend ownership context.
@@ -53,6 +69,52 @@ flowchart LR
 6. The platform generates test cases and builds a report package.
 7. Progress snapshots are streamed live to the frontend.
 8. Final results remain available in history, report, findings, tests, and comparison views.
+
+### Analysis run lifecycle
+
+```mermaid
+flowchart TD
+  A["Submit target URL"] --> B["Create queued run"]
+  B --> C["Worker claims run"]
+  C --> D["Launch Playwright"]
+  D --> E["Discover pages and interactions"]
+  E --> F["Run deep analysis"]
+  F --> G["Generate test cases"]
+  G --> H["Build report"]
+  H --> I["Persist run data"]
+  I --> J["Stream updates to UI"]
+  J --> K["Completed run available in dashboard"]
+```
+
+### Login checkpoint flow
+
+```mermaid
+flowchart TD
+  A["Crawler detects login surface"] --> B["Run enters awaiting checkpoint"]
+  B --> C{"Operator choice"}
+  C --> D["Continue without login"]
+  C --> E["Start dedicated login session"]
+  D --> F["Resume crawl on current run"]
+  E --> G["Open headed login-capable run"]
+  G --> H["Complete login manually"]
+  H --> I["Resume analysis after checkpoint"]
+  F --> J["Finish analysis"]
+  I --> J
+```
+
+### Retry and resume flow
+
+```mermaid
+flowchart TD
+  A["Run fails or stalls on page/interaction"] --> B["Platform inspects prior run"]
+  B --> C["Collect failed page and interaction context"]
+  C --> D["Create retry run with resume state"]
+  D --> E["Worker starts retry run"]
+  E --> F["Skip completed pages and passed interactions"]
+  F --> G["Resume from failure point"]
+  G --> H["Merge resumed results with prior successful evidence"]
+  H --> I["Store completed retry run"]
+```
 
 ## Repository structure
 
@@ -99,37 +161,22 @@ sk-testing/
 - `History`: previously stored runs with reopen support
 - `Compare`: side-by-side run comparison for regressions and fixes
 
-## Main backend capabilities
+### Frontend view navigation flow
 
-### Analysis API
-
-The backend exposes these core endpoints:
-
-- `GET /health`
-- `POST /api/analysis/run`
-- `GET /api/analysis/runs`
-- `GET /api/analysis/runs/:runId`
-- `GET /api/analysis/runs/:runId/stream`
-- `POST /api/analysis/runs/:runId/retry`
-- `POST /api/analysis/runs/:runId/checkpoint/continue`
-- `POST /api/analysis/runs/:runId/checkpoint/login-run`
-
-### Analysis engine
-
-Key implementation areas:
-
-- `backend/src/modules/frontend/crawler.ts`
-  Crawls same-origin pages, extracts structure, tracks network requests, captures previews, tests interactions, and handles login/checkpoint flows.
-- `backend/src/modules/frontend/deepAnalysis.ts`
-  Adds accessibility checks, visual-overflow checks, API assertions, boundary probes, and scenario-pack execution.
-- `backend/src/modules/frontend/testGenerator.ts`
-  Converts collected evidence into categorized QA test cases.
-- `backend/src/modules/backend/apiValidator.ts`
-  Correlates observed API usage with optional repository or uploaded-path ownership signals.
-- `backend/src/modules/platform/analysisService.ts`
-  Owns queue draining, worker orchestration, buffering, streaming, retry creation, checkpoint continuation, and run completion/failure handling.
-- `backend/src/modules/reporting/reportBuilder.ts`
-  Builds overview/issues/performance sections, Mermaid flowcharts, and PDF-outline content.
+```mermaid
+flowchart LR
+  A["Run"] --> B["Overview"]
+  B --> C["Pages"]
+  B --> D["Findings"]
+  B --> E["Tests"]
+  B --> F["Report"]
+  B --> G["History"]
+  G --> H["Open prior run"]
+  H --> B
+  G --> I["Select two runs"]
+  I --> J["Compare"]
+  J --> B
+```
 
 ## Local setup
 
@@ -138,31 +185,6 @@ Key implementation areas:
 - Node.js and npm
 - MongoDB reachable through a connection string
 - A Chromium-compatible browser available for Playwright
-
-### Environment
-
-Create `backend/.env` with values appropriate for your machine:
-
-```env
-PORT=5000
-MONGO_URI=mongodb://127.0.0.1:27017/sk-crawlpulse
-CORS_ORIGIN=http://localhost:5173
-ARTIFACTS_DIR=artifacts
-PLAYWRIGHT_HEADLESS=true
-CRAWLER_TIMEOUT_MS=20000
-CRAWLER_MAX_PAGES=50
-CRAWLER_MAX_LINKS_PER_PAGE=80
-CRAWLER_MAX_DEPTH=4
-CRAWLER_MAX_INTERACTIONS_PER_PAGE=16
-ARTIFACT_RETENTION_DAYS=14
-ARTIFACT_CLEANUP_INTERVAL_MS=3600000
-ARTIFACT_CLEANUP_ENABLED=true
-```
-
-Optional:
-
-- `BROWSER_EXECUTABLE_PATH` to force a specific browser binary
-- `VITE_API_BASE_URL` in the frontend environment if the API is not at `http://localhost:5000`
 
 ### Install
 
@@ -192,24 +214,6 @@ npm run dev
 
 Then open the Vite app URL shown by the frontend dev server, usually `http://localhost:5173`.
 
-## Build
-
-Backend:
-
-```bash
-cd backend
-npm run build
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm run build
-```
-
-Both builds are currently passing in this workspace.
-
 ## Output and stored artifacts
 
 The platform produces:
@@ -224,6 +228,26 @@ The platform produces:
 - report sections and Mermaid flowchart content
 
 Generated file artifacts are written under `backend/artifacts/` and are intentionally ignored by Git.
+
+### Artifact generation flow
+
+```mermaid
+flowchart TD
+  A["Crawl pages"] --> B["Capture page previews"]
+  A --> C["Track links, forms, inputs, buttons"]
+  C --> D["Execute interactions"]
+  D --> E["Capture before/after screenshots"]
+  D --> F["Collect runtime findings"]
+  A --> G["Observe network traffic"]
+  G --> H["Build API assertions"]
+  F --> I["Generate QA test cases"]
+  H --> I
+  I --> J["Assemble report"]
+  B --> K["Store artifacts"]
+  E --> K
+  J --> L["Persist run result"]
+  K --> L
+```
 
 ## Documentation and examples
 
