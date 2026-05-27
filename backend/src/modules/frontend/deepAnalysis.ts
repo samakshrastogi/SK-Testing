@@ -14,11 +14,14 @@ const isTimeoutError = (error: unknown) =>
   error instanceof Error &&
   (error.name === "TimeoutError" || /Timeout \d+ms exceeded/i.test(error.message));
 
+const buildArtifactPublicUrl = (...segments: string[]) =>
+  `${env.runtime.artifactsPublicRoute}/${segments.map((segment) => segment.replace(/^\/+|\/+$/g, "")).join("/")}`;
+
 const waitForPageSettled = async (page: Page, timeoutMs = env.crawler.timeoutMs) => {
   await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs }).catch(() => undefined);
-  await page.waitForLoadState("load", { timeout: Math.min(timeoutMs, 10_000) }).catch(() => undefined);
-  await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 3_000) }).catch(() => undefined);
-  await page.waitForTimeout(600).catch(() => undefined);
+  await page.waitForLoadState("load", { timeout: Math.min(timeoutMs, env.crawler.loadStateTimeoutMs) }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, env.crawler.networkIdleTimeoutMs) }).catch(() => undefined);
+  await page.waitForTimeout(env.crawler.settleDelayMs).catch(() => undefined);
 };
 
 const gotoScenarioPage = async (page: Page, url: string, timeoutMs = env.crawler.timeoutMs) => {
@@ -55,7 +58,7 @@ const gotoScenarioPage = async (page: Page, url: string, timeoutMs = env.crawler
 const scenarioDir = (runId: string) =>
   path.resolve(process.cwd(), env.runtime.artifactsDir, "scenario-failures", runId);
 
-const scenarioUrl = (runId: string, fileName: string) => `/artifacts/scenario-failures/${runId}/${fileName}`;
+const scenarioUrl = (runId: string, fileName: string) => buildArtifactPublicUrl("scenario-failures", runId, fileName);
 
 const summarizeShape = (value: unknown, depth = 0): string[] => {
   if (depth > 2) {
@@ -401,7 +404,7 @@ export const executeScenarioPacks = async ({
       if ((await searchLocator.count()) > 0) {
         await searchLocator.fill("qa smoke query").catch(() => undefined);
         await searchLocator.press("Enter").catch(() => undefined);
-        await page.waitForTimeout(600);
+        await page.waitForTimeout(env.crawler.settleDelayMs);
         scenarioResults.push({
           scenarioId: `search_${scenarioResults.length + 1}`,
           pack: "search",
@@ -421,7 +424,7 @@ export const executeScenarioPacks = async ({
       if ((await formLocator.count()) > 0 && (await submitLocator.count()) > 0) {
         const validationBefore = await page.locator(":invalid").count();
         await submitLocator.click().catch(() => undefined);
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(env.crawler.recoveryWaitMs);
         const validationAfter = await page.locator(":invalid").count();
         scenarioResults.push({
           scenarioId: `forms_${scenarioResults.length + 1}`,
@@ -444,7 +447,7 @@ export const executeScenarioPacks = async ({
       if ((await paginationTarget.count()) > 0) {
         const before = page.url();
         await paginationTarget.click().catch(() => undefined);
-        await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, 6_000));
+        await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, env.crawler.navigationRecoverySettleTimeoutMs));
         scenarioResults.push({
           scenarioId: `pagination_${scenarioResults.length + 1}`,
           pack: "pagination",
@@ -511,7 +514,7 @@ export const executeScenarioPacks = async ({
       const cartButton = page.locator("button, a").filter({ hasText: /cart|checkout|buy/i }).first();
       if ((await cartButton.count()) > 0) {
         await cartButton.click().catch(() => undefined);
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(env.crawler.recoveryWaitMs);
         scenarioResults.push({
           scenarioId: `cart_${scenarioResults.length + 1}`,
           pack: "cart",
@@ -580,7 +583,7 @@ export const runBoundaryAndLimitChecks = async ({
       for (let index = 0; index < 3; index += 1) {
         await repeatedButton.click().catch(() => undefined);
       }
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(env.crawler.recoveryWaitMs);
       scenarioResults.push({
         scenarioId: `rapid_click_${scenarioResults.length + 1}`,
         pack: "forms",

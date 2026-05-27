@@ -22,6 +22,7 @@ import {
   updateAnalysisRunProgress,
 } from "./runStore";
 import { publishRunEvent, subscribeToRunEvents } from "./runEvents";
+import { env } from "../../config/env";
 import type {
   AnalysisRequest,
   AnalysisRunView,
@@ -37,7 +38,6 @@ import type {
 } from "../../types/platform";
 
 const WORKER_ID = `worker-${randomUUID()}`;
-const MAX_CONCURRENT_RUNS = 2;
 const activeRuns = new Set<string>();
 const checkpointWaiters = new Map<
   string,
@@ -48,11 +48,6 @@ const checkpointWaiters = new Map<
 >();
 const runBuffers = new Map<string, RunPersistenceBuffer>();
 let isDrainingQueue = false;
-const PROGRESS_FLUSH_INTERVAL_MS = 1_500;
-const LOG_FLUSH_INTERVAL_MS = 2_000;
-const LOG_BATCH_SIZE = 20;
-const INTERACTION_BATCH_SIZE = 10;
-const LEASE_HEARTBEAT_INTERVAL_MS = 30_000;
 
 class DedicatedLoginSessionError extends Error {
   constructor() {
@@ -350,7 +345,7 @@ export const startLoginSessionAnalysis = async (runId: string): Promise<Analysis
           enabled: true,
           checkpointLabel: "Complete login",
           instructions: "Complete login or OTP in the visible crawler browser session, then continue the checkpoint.",
-          timeoutSeconds: 600,
+          timeoutSeconds: env.crawler.loginCheckpointTimeoutSeconds,
         },
       },
     },
@@ -416,7 +411,7 @@ const logRun = async (
   buffer.pendingLogs.push(entry);
   publishBufferedSnapshot(runId);
 
-  if (buffer.pendingLogs.length >= LOG_BATCH_SIZE) {
+  if (buffer.pendingLogs.length >= env.analysis.logBatchSize) {
     try {
       await flushRunBuffer(runId, { force: true });
     } catch (error) {
@@ -425,7 +420,7 @@ const logRun = async (
     return;
   }
 
-  scheduleRunBufferFlush(runId, LOG_FLUSH_INTERVAL_MS);
+  scheduleRunBufferFlush(runId, env.analysis.logFlushIntervalMs);
 };
 
 const toErrorMessage = (error: unknown) => {
@@ -446,7 +441,7 @@ const toErrorMessage = (error: unknown) => {
   return "Analysis failed";
 };
 
-const scheduleRunBufferFlush = (runId: string, delayMs = PROGRESS_FLUSH_INTERVAL_MS) => {
+const scheduleRunBufferFlush = (runId: string, delayMs = env.analysis.progressFlushIntervalMs) => {
   const buffer = getRunBuffer(runId);
   if (!buffer) {
     return;
@@ -471,7 +466,7 @@ const flushRunBuffer = async (runId: string, { force = false }: { force?: boolea
   const now = Date.now();
   const shouldFlushProgress =
     buffer.pendingProgress &&
-    (force || now - buffer.lastProgressFlushAt >= PROGRESS_FLUSH_INTERVAL_MS);
+    (force || now - buffer.lastProgressFlushAt >= env.analysis.progressFlushIntervalMs);
 
   const pendingPages = Array.from(buffer.pendingPages.values());
   const pendingInteractions = Array.from(buffer.pendingInteractions.values());
@@ -558,7 +553,7 @@ const executePlatformAnalysis = async (run: AnalysisRunView) => {
     void touchAnalysisRunLease(runId, WORKER_ID).catch((error) => {
       console.warn(`[analysis:${runId}] [lease] heartbeat failed: ${toErrorMessage(error)}`);
     });
-  }, LEASE_HEARTBEAT_INTERVAL_MS);
+  }, env.analysis.leaseHeartbeatIntervalMs);
   await logRun(runId, "queue", `started for ${request.targetUrl}`);
 
   try {
@@ -623,7 +618,7 @@ const executePlatformAnalysis = async (run: AnalysisRunView) => {
           buffer.snapshot.interactions.length,
         );
         publishBufferedSnapshot(runId);
-        if (buffer.pendingInteractions.size >= INTERACTION_BATCH_SIZE) {
+        if (buffer.pendingInteractions.size >= env.analysis.interactionBatchSize) {
           await flushRunBuffer(runId, { force: true });
         } else {
           scheduleRunBufferFlush(runId);
@@ -886,13 +881,13 @@ const elapsedToSeconds = (startedAt: string) =>
   Math.max(1, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000));
 
 const drainQueue = async () => {
-  if (isDrainingQueue || activeRuns.size >= MAX_CONCURRENT_RUNS) {
+  if (isDrainingQueue || activeRuns.size >= env.analysis.maxConcurrentRuns) {
     return;
   }
 
   isDrainingQueue = true;
   try {
-    const availableSlots = MAX_CONCURRENT_RUNS - activeRuns.size;
+    const availableSlots = env.analysis.maxConcurrentRuns - activeRuns.size;
 
     for (let index = 0; index < availableSlots; index += 1) {
       const run = await claimQueuedAnalysisRun(WORKER_ID);
@@ -911,7 +906,7 @@ export const initializeAnalysisWorker = () => {
   void resetExpiredAnalysisRuns().then(() => drainQueue());
   setInterval(() => {
     void resetExpiredAnalysisRuns().then(() => drainQueue());
-  }, 5_000);
+  }, env.analysis.queuePollIntervalMs);
 };
 
 export const continueAnalysisCheckpoint = async (
@@ -948,7 +943,7 @@ export const streamPlatformAnalysisRun = async (runId: string, res: Response) =>
   const unsubscribe = subscribeToRunEvents(runId, write);
   const heartbeat = setInterval(() => {
     res.write(": keepalive\n\n");
-  }, 15_000);
+  }, env.analysis.streamHeartbeatIntervalMs);
 
   res.on("close", () => {
     clearInterval(heartbeat);

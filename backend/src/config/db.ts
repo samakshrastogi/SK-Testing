@@ -3,10 +3,6 @@ import { env } from "./env";
 
 export const connectDB = async () => {
   try {
-    if (!env.secrets.mongoUri) {
-      throw new Error("Missing required environment variable: MONGO_URI");
-    }
-
     mongoose.connection.on("error", (error) => {
       console.error("❌ MongoDB connection error:", error);
     });
@@ -20,10 +16,10 @@ export const connectDB = async () => {
     });
 
     await mongoose.connect(env.secrets.mongoUri, {
-      maxPoolSize: 10,
-      minPoolSize: 1,
-      serverSelectionTimeoutMS: 15_000,
-      socketTimeoutMS: 45_000,
+      maxPoolSize: env.database.maxPoolSize,
+      minPoolSize: env.database.minPoolSize,
+      serverSelectionTimeoutMS: env.database.serverSelectionTimeoutMs,
+      socketTimeoutMS: env.database.socketTimeoutMs,
     });
 
     console.log("✅ MongoDB Connected");

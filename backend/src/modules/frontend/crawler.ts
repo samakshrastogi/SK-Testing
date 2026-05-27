@@ -75,9 +75,11 @@ type LoginSurfaceDetection = {
 
 const browserCandidates = [
   env.crawler.browserExecutablePath,
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  ...env.crawler.browserFallbackExecutablePaths,
 ].filter((candidate): candidate is string => Boolean(candidate));
+
+const buildArtifactPublicUrl = (...segments: string[]) =>
+  `${env.runtime.artifactsPublicRoute}/${segments.map((segment) => segment.replace(/^\/+|\/+$/g, "")).join("/")}`;
 
 const interactionSelector =
   "button, a[href], select, textarea, input:not([type='hidden']):not([type='file']), [role='button']";
@@ -86,13 +88,13 @@ const screenshotDirectory = (runId: string) =>
   path.resolve(process.cwd(), env.runtime.artifactsDir, "interaction-failures", runId);
 
 const screenshotUrlFromPath = (runId: string, fileName: string) =>
-  `/artifacts/interaction-failures/${runId}/${fileName}`;
+  buildArtifactPublicUrl("interaction-failures", runId, fileName);
 
 const previewDirectory = (runId: string) =>
   path.resolve(process.cwd(), env.runtime.artifactsDir, "live-previews", runId);
 
 const previewUrlFromPath = (runId: string, fileName: string) =>
-  `/artifacts/live-previews/${runId}/${fileName}`;
+  buildArtifactPublicUrl("live-previews", runId, fileName);
 
 const formatCrawlerError = (error: unknown) => {
   if (error instanceof Error) {
@@ -132,7 +134,7 @@ const withNavigationRetry = async <T>(
         throw error;
       }
 
-      await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, 6_000)).catch(() => undefined);
+      await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, env.crawler.navigationRecoverySettleTimeoutMs)).catch(() => undefined);
     }
   }
 
@@ -149,9 +151,9 @@ const getSafePageContent = (page: Page) => withNavigationRetry(page, () => page.
 
 const waitForPageSettled = async (page: Page, timeoutMs = env.crawler.timeoutMs) => {
   await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs }).catch(() => undefined);
-  await page.waitForLoadState("load", { timeout: Math.min(timeoutMs, 10_000) }).catch(() => undefined);
-  await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 3_000) }).catch(() => undefined);
-  await page.waitForTimeout(600).catch(() => undefined);
+  await page.waitForLoadState("load", { timeout: Math.min(timeoutMs, env.crawler.loadStateTimeoutMs) }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, env.crawler.networkIdleTimeoutMs) }).catch(() => undefined);
+  await page.waitForTimeout(env.crawler.settleDelayMs).catch(() => undefined);
 };
 
 const hasUsefulNavigationState = async (page: Page, url: string) => {
@@ -191,7 +193,7 @@ const gotoStable = async (page: Page, url: string, timeoutMs = env.crawler.timeo
   let lastError: unknown;
 
   for (const candidate of candidates) {
-    for (const attemptTimeoutMs of [timeoutMs, Math.max(timeoutMs * 2, 45_000)]) {
+    for (const attemptTimeoutMs of [timeoutMs, Math.max(timeoutMs * 2, env.crawler.extendedGotoTimeoutMs)]) {
       try {
         await page.goto(candidate, {
           waitUntil: "commit",
@@ -211,8 +213,8 @@ const gotoStable = async (page: Page, url: string, timeoutMs = env.crawler.timeo
           return;
         }
 
-        await page.goto("about:blank", { waitUntil: "commit", timeout: 5_000 }).catch(() => undefined);
-        await page.waitForTimeout(500).catch(() => undefined);
+        await page.goto("about:blank", { waitUntil: "commit", timeout: env.crawler.recoveryBlankTimeoutMs }).catch(() => undefined);
+        await page.waitForTimeout(env.crawler.recoveryWaitMs).catch(() => undefined);
       }
     }
   }
@@ -820,7 +822,7 @@ const waitForAuthenticatedSession = async ({
   while (Date.now() < deadline) {
     const loginSurface = await detectLoginSurface(page).catch(() => null);
     if (!loginSurface) {
-      await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, 3_000)).catch(() => undefined);
+      await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, env.crawler.networkIdleTimeoutMs)).catch(() => undefined);
       return true;
     }
 
@@ -870,7 +872,7 @@ const maybePauseForDetectedLogin = async ({
   }
 
   const loginPrompt = request.options.loginPrompt;
-  const timeoutSeconds = loginPrompt?.timeoutSeconds ?? 600;
+  const timeoutSeconds = loginPrompt?.timeoutSeconds ?? env.crawler.loginCheckpointTimeoutSeconds;
   const previewImageUrl = await capturePreviewImage({
     page,
     runId,
@@ -902,7 +904,7 @@ const maybePauseForDetectedLogin = async ({
   if (action === "continue_without_login" && movedToLoginPage) {
     await gotoStable(page, originalUrl, env.crawler.timeoutMs).catch(() => undefined);
   } else {
-    await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, 6_000)).catch(() => undefined);
+    await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, env.crawler.navigationRecoverySettleTimeoutMs)).catch(() => undefined);
   }
 };
 
@@ -1200,7 +1202,7 @@ const prepareAuth = async ({
   if (login.manualCheckpoint?.enabled && callbacks?.waitForCheckpoint) {
     const autoAuthenticated = await waitForAuthenticatedSession({
       page,
-      timeoutMs: 15_000,
+      timeoutMs: env.crawler.authSessionDetectionTimeoutMs,
     }).catch(() => false);
     if (autoAuthenticated) {
       await callbacks.onWarning?.(
@@ -1214,7 +1216,7 @@ const prepareAuth = async ({
         `Login session at ${toRoutePath(page.url())} appears authenticated already, skipping manual login checkpoint.`,
       );
     } else {
-    const timeoutSeconds = login.manualCheckpoint.timeoutSeconds ?? 600;
+    const timeoutSeconds = login.manualCheckpoint.timeoutSeconds ?? env.crawler.loginCheckpointTimeoutSeconds;
     await callbacks.waitForCheckpoint({
       kind: "manual_auth",
       label: login.manualCheckpoint.checkpointLabel ?? "Manual login / OTP required",
@@ -1339,7 +1341,7 @@ const evaluateInteraction = async ({
     } else {
       await locator.click({ timeout: env.crawler.timeoutMs });
     }
-    await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, 6_000));
+    await waitForPageSettled(page, Math.min(env.crawler.timeoutMs, env.crawler.navigationRecoverySettleTimeoutMs));
 
     const afterUrl = page.url();
     const afterSignature = await getPageSignature(page);

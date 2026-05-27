@@ -10,21 +10,21 @@ const app = express();
 app.use(
   cors({
     origin: env.runtime.corsOrigin === "*" ? true : env.runtime.corsOrigin,
-    credentials: true,
+    credentials: env.runtime.corsCredentials,
   }),
 );
-app.use(express.json({ limit: "2mb" }));
-app.use("/artifacts", express.static(path.resolve(process.cwd(), env.runtime.artifactsDir)));
+app.use(express.json({ limit: env.runtime.jsonBodyLimit }));
+app.use(env.runtime.artifactsPublicRoute, express.static(path.resolve(process.cwd(), env.runtime.artifactsDir)));
 
 app.get("/health", (_req, res) => {
   res.json({
-    service: "sk-crawlpulse",
+    service: env.runtime.serviceName,
     status: "ok",
     timestamp: new Date().toISOString(),
   });
 });
 
-app.use("/api/analysis", analysisRouter);
+app.use(env.runtime.analysisApiRoute, analysisRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
 

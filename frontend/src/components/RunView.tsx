@@ -52,6 +52,7 @@ type RunViewProps = {
 };
 
 const API_BASE_URL = runtime.apiBaseUrl;
+const ANALYSIS_API_BASE_URL = `${runtime.apiBaseUrl}${runtime.analysisApiPath}`;
 
 export function RunView({
   currentRun,
@@ -133,13 +134,13 @@ export function RunView({
     const fallbackAt = currentRun.progress.checkpoint.expiresAt
       ? Math.min(
           new Date(currentRun.progress.checkpoint.expiresAt).getTime(),
-          new Date(currentRun.updatedAt).getTime() + 120_000,
+          new Date(currentRun.updatedAt).getTime() + runtime.defaultAnalysisOptions.loginDecisionFallbackMs,
         )
-      : new Date(currentRun.updatedAt).getTime() + 120_000;
+      : new Date(currentRun.updatedAt).getTime() + runtime.defaultAnalysisOptions.loginDecisionFallbackMs;
 
     if (Date.now() >= fallbackAt) {
       setLoginDecisionHandled(currentRun.runId);
-      void fetch(`${API_BASE_URL}/api/analysis/runs/${currentRun.runId}/checkpoint/continue`, {
+      void fetch(`${ANALYSIS_API_BASE_URL}/runs/${currentRun.runId}/checkpoint/continue`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -153,7 +154,7 @@ export function RunView({
 
     const timeout = window.setTimeout(() => {
       setLoginDecisionHandled(currentRun.runId);
-      void fetch(`${API_BASE_URL}/api/analysis/runs/${currentRun.runId}/checkpoint/continue`, {
+      void fetch(`${ANALYSIS_API_BASE_URL}/runs/${currentRun.runId}/checkpoint/continue`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -201,7 +202,7 @@ export function RunView({
             setLoginDecisionHandled(currentRun.runId);
             try {
               if (action === "continue_after_login") {
-                const response = await fetch(`${API_BASE_URL}/api/analysis/runs/${currentRun.runId}/checkpoint/login-run`, {
+                const response = await fetch(`${ANALYSIS_API_BASE_URL}/runs/${currentRun.runId}/checkpoint/login-run`, {
                   method: "POST",
                 });
                 const nextRun = (await response.json()) as AnalysisRun & { error?: string };
@@ -211,7 +212,7 @@ export function RunView({
                 onReplaceRun(nextRun);
                 return;
               }
-              await fetch(`${API_BASE_URL}/api/analysis/runs/${currentRun.runId}/checkpoint/continue`, {
+              await fetch(`${ANALYSIS_API_BASE_URL}/runs/${currentRun.runId}/checkpoint/continue`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -455,7 +456,7 @@ function RunTracker({
   const continueCheckpoint = async (action: "continue_without_login" | "continue_after_login" = "continue_after_login") => {
     try {
       setCheckpointLoading(true);
-      await fetch(`${API_BASE_URL}/api/analysis/runs/${run.runId}/checkpoint/continue`, {
+      await fetch(`${ANALYSIS_API_BASE_URL}/runs/${run.runId}/checkpoint/continue`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

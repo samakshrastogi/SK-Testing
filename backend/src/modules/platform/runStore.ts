@@ -37,6 +37,15 @@ const MAX_LIVE_SESSION_HTML_CHARS = 8_000;
 const MAX_TEXT_SNIPPET_CHARS = 4_000;
 const MAX_COLLECTION_PREVIEW_ITEMS = 80;
 
+const toArtifactRelativePath = (publicUrl: string) => {
+  const routePrefix = `${env.runtime.artifactsPublicRoute}/`;
+  if (publicUrl.startsWith(routePrefix)) {
+    return publicUrl.slice(routePrefix.length);
+  }
+
+  return publicUrl.replace(/^\/+/, "");
+};
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isRetryableMongoError = (error: unknown) => {
@@ -793,7 +802,7 @@ export const persistAnalysisArtifact = async ({
   const artifactId = `${runId}:${kind}:${relatedInteractionId ?? relatedPageUrl ?? publicUrl}`;
   const resolvedAbsolutePath =
     absolutePath ??
-    path.resolve(process.cwd(), env.runtime.artifactsDir, publicUrl.replace(/^\/artifacts\//, "").replace(/\//g, path.sep));
+    path.resolve(process.cwd(), env.runtime.artifactsDir, toArtifactRelativePath(publicUrl).replace(/\//g, path.sep));
   const retentionDays = env.artifacts.retentionDays;
 
   await withMongoRetry(`persistAnalysisArtifact:${artifactId}`, () =>

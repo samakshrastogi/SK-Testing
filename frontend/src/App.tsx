@@ -17,6 +17,8 @@ import { runtime } from "./config/runtime";
 import type { AnalysisResponse, AnalysisRun, AnalysisSubmission, AppView, GlobalFilters, SavedProject } from "./types/analysis";
 
 const API_BASE_URL = runtime.apiBaseUrl;
+const ANALYSIS_API_BASE_URL = `${API_BASE_URL}${runtime.analysisApiPath}`;
+const DEFAULT_ANALYSIS_OPTIONS = runtime.defaultAnalysisOptions;
 const SAVED_PROJECTS_KEY = "sk-crawlpulse:saved-projects";
 const APP_STATE_KEY = "sk-crawlpulse:app-state";
 const THEME_MODE_KEY = "pulse:theme-mode";
@@ -242,7 +244,7 @@ export default function App() {
       return;
     }
 
-    const stream = new EventSource(`${API_BASE_URL}/api/analysis/runs/${currentRun.runId}/stream`);
+    const stream = new EventSource(`${ANALYSIS_API_BASE_URL}/runs/${currentRun.runId}/stream`);
     streamRef.current = stream;
 
     stream.onmessage = (event) => {
@@ -315,7 +317,7 @@ export default function App() {
 
   const fetchHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/analysis/runs`);
+      const response = await fetch(`${ANALYSIS_API_BASE_URL}/runs`);
       const runs = (await response.json()) as AnalysisRun[];
       if (response.ok) {
         setHistoryRuns(runs);
@@ -334,7 +336,7 @@ export default function App() {
   };
 
   const fetchRun = async (runId: string) => {
-    const response = await fetch(`${API_BASE_URL}/api/analysis/runs/${runId}`);
+    const response = await fetch(`${ANALYSIS_API_BASE_URL}/runs/${runId}`);
     const run = (await response.json()) as AnalysisRun;
     if (!response.ok) {
       throw new Error("Failed to fetch run");
@@ -344,7 +346,7 @@ export default function App() {
 
   const retryRun = async (runId: string) => {
     setLoading(true);
-    const response = await fetch(`${API_BASE_URL}/api/analysis/runs/${runId}/retry`, {
+    const response = await fetch(`${ANALYSIS_API_BASE_URL}/runs/${runId}/retry`, {
       method: "POST",
     });
     const nextRun = (await response.json()) as AnalysisRun & { error?: string };
@@ -387,25 +389,25 @@ export default function App() {
         uploadedPath: uploadedPath || undefined,
       },
       options: {
-        maxPages: 50,
-        maxLinksPerPage: 80,
-        maxDepth: 4,
-        maxInteractionsPerPage: 120,
-        respectRobotsTxt: true,
-        streamHtmlPreview: true,
-        crawlProfile: "auto",
-        strictBehaviorMode: true,
-        promptForLogin: true,
+        maxPages: DEFAULT_ANALYSIS_OPTIONS.maxPages,
+        maxLinksPerPage: DEFAULT_ANALYSIS_OPTIONS.maxLinksPerPage,
+        maxDepth: DEFAULT_ANALYSIS_OPTIONS.maxDepth,
+        maxInteractionsPerPage: DEFAULT_ANALYSIS_OPTIONS.maxInteractionsPerPage,
+        respectRobotsTxt: DEFAULT_ANALYSIS_OPTIONS.respectRobotsTxt,
+        streamHtmlPreview: DEFAULT_ANALYSIS_OPTIONS.streamHtmlPreview,
+        crawlProfile: DEFAULT_ANALYSIS_OPTIONS.crawlProfile,
+        strictBehaviorMode: DEFAULT_ANALYSIS_OPTIONS.strictBehaviorMode,
+        promptForLogin: DEFAULT_ANALYSIS_OPTIONS.promptForLogin,
         loginPrompt: {
-          enabled: true,
-          checkpointLabel: "Login available on this website",
-          timeoutSeconds: 600,
+          enabled: DEFAULT_ANALYSIS_OPTIONS.loginPromptEnabled,
+          checkpointLabel: DEFAULT_ANALYSIS_OPTIONS.loginPromptLabel,
+          timeoutSeconds: DEFAULT_ANALYSIS_OPTIONS.loginPromptTimeoutSeconds,
         },
       },
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/analysis/run`, {
+      const response = await fetch(`${ANALYSIS_API_BASE_URL}/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
